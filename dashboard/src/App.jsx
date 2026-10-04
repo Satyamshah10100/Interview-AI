@@ -20,7 +20,8 @@ import {
   BarChart2,
   ShieldAlert,
   Award,
-  Loader2
+  Loader2,
+  ArrowUpRight
 } from 'lucide-react';
 import { 
   Radar, 
@@ -60,6 +61,7 @@ export default function App() {
     { id: 'ats', icon: CheckCircle, label: 'ATS Pre-Check' },
     { id: 'arena', icon: Target, label: 'The Arena' },
     { id: 'dossier', icon: FileText, label: 'Performance Dossier' },
+    { id: 'resume', icon: FileText, label: 'Resume-Analysis' },
   ];
 
   return (
@@ -115,6 +117,7 @@ export default function App() {
         {currentView === 'ats' && <ATSView />}
         {currentView === 'arena' && <ArenaView />}
         {currentView === 'dossier' && <DossierView />}
+        {currentView === 'resume' && <ResumeView />}
       </main>
     </div>
   );
@@ -691,6 +694,417 @@ function DossierView() {
       </div>
 
     </div>
+  );
+}
+
+function ResumeView() {
+  const resumeBuilderRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const [resumeData, setResumeData] = useState({
+    name: "",
+    role: "",
+    phone: "",
+    email: "",
+    location: "",
+    about: "",
+    education: "",
+    experience: "",
+    skills: "",
+  });
+  const [atsScore, setAtsScore] = useState(null);
+  const [feedback, setFeedback] = useState([]);
+  const [resumeText, setResumeText] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState(null);
+
+  const scrollToResumeBuilder = () => {
+    resumeBuilderRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const removePDF = () => {
+    setUploadedFileName(null);
+    setResumeText("");
+    setAtsScore(null);
+    setFeedback([]);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsLoading(true);
+    setUploadedFileName(file.name);
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item) => item.str)
+          .join(" ");
+        fullText += pageText + "\n";
+      }
+      setResumeText(fullText);
+      analyzeResume(fullText);
+    } catch (error) {
+      console.error("Error parsing PDF:", error);
+      setUploadedFileName(null);
+      alert("Failed to read PDF file. Please try again or paste text manually.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const analyzeResume = (text) => {
+    let score = 0;
+    const feedbackList = [];
+    const lowerText = text.toLowerCase();
+
+    const keywords = [
+      "experience", "skills", "education", "summary", "achievements", "projects",
+      "contact", "email", "phone", "linkedin", "github",
+      "javascript", "python", "react", "node", "sql", "aws",
+      "team", "leadership", "managed", "developed", "created",
+      "improved", "increased", "decreased",
+    ];
+
+    let keywordCount = 0;
+    keywords.forEach((keyword) => {
+      if (lowerText.includes(keyword)) keywordCount++;
+    });
+    score += Math.round((keywordCount / keywords.length) * 40);
+
+    if (text.length > 500) {
+      score += 20;
+    } else {
+      feedbackList.push("Resume is too short. Aim for at least 500 characters.");
+    }
+
+    if ((text.match(/[0-9]/g)?.length || 0) > 5) {
+      score += 20;
+    } else {
+      feedbackList.push("Add quantifiable achievements (numbers, percentages).");
+    }
+
+    if (lowerText.includes("@") && (lowerText.includes(".com") || lowerText.includes(".in") || lowerText.includes(".net"))) {
+      score += 20;
+    } else {
+      feedbackList.push("Make sure your email is clearly visible.");
+    }
+
+    setAtsScore(Math.min(100, score));
+    setFeedback(feedbackList.length > 0 ? feedbackList : ["Great! Your resume is ATS-friendly!"]);
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setResumeData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const generatePDF = () => {
+    import("jspdf").then(({ default: jsPDF }) => {
+      const doc = new jsPDF();
+      const marginLeft = 20;
+      const marginTop = 20;
+      let y = marginTop;
+
+      doc.setFontSize(28);
+      doc.setFont("helvetica", "bold");
+      doc.text(resumeData.name || "Your Name", marginLeft, y);
+      y += 12;
+
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "normal");
+      doc.text(resumeData.role || "Your Role", marginLeft, y);
+      y += 10;
+
+      doc.setFontSize(10);
+      const contactParts = [];
+      if (resumeData.phone) contactParts.push(`Phone: ${resumeData.phone}`);
+      if (resumeData.email) contactParts.push(`Email: ${resumeData.email}`);
+      if (resumeData.location) contactParts.push(`Location: ${resumeData.location}`);
+      const contactLine = contactParts.join("   |   ");
+      doc.text(contactLine, marginLeft, y);
+      y += 15;
+
+      const addSection = (title, content) => {
+        if (!content) return;
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text(title, marginLeft, y);
+        y += 8;
+        doc.setLineWidth(0.5);
+        doc.line(marginLeft, y, 195, y);
+        y += 8;
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        const lines = doc.splitTextToSize(content, 175);
+        doc.text(lines, marginLeft, y);
+        y += (lines.length * 6) + 12;
+      };
+
+      addSection("ABOUT ME", resumeData.about);
+      addSection("EDUCATION", resumeData.education);
+      addSection("WORK EXPERIENCE", resumeData.experience);
+
+      if (resumeData.skills) {
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("SKILLS", marginLeft, y);
+        y += 8;
+        doc.setLineWidth(0.5);
+        doc.line(marginLeft, y, 195, y);
+        y += 8;
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        const skillsArray = resumeData.skills
+          .split(/[,;\n]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const skillsPerColumn = Math.ceil(skillsArray.length / 3);
+        const column1 = skillsArray.slice(0, skillsPerColumn);
+        const column2 = skillsArray.slice(skillsPerColumn, skillsPerColumn * 2);
+        const column3 = skillsArray.slice(skillsPerColumn * 2);
+        const startX1 = marginLeft;
+        const startX2 = marginLeft + 60;
+        const startX3 = marginLeft + 120;
+        for (let i = 0; i < skillsPerColumn; i++) {
+          if (column1[i]) doc.text(`• ${column1[i]}`, startX1, y + (i * 6));
+          if (column2[i]) doc.text(`• ${column2[i]}`, startX2, y + (i * 6));
+          if (column3[i]) doc.text(`• ${column3[i]}`, startX3, y + (i * 6));
+        }
+      }
+
+      doc.save(`${resumeData.name || "resume"}.pdf`);
+    });
+  };
+
+  const scoreCircumference = 283;
+  const strokeDashoffset = atsScore !== null ? scoreCircumference - (scoreCircumference * atsScore) / 100 : scoreCircumference;
+
+  return (
+    <main className="flex-grow p-8 animate-in fade-in duration-500">
+      <header className="mb-8 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <FileText className="text-blue-600" /> Resume Builder &amp; ATS Analyzer
+          </h2>
+          <p className="text-slate-500 mt-1">
+            Upload or paste your resume to check ATS compatibility, or build a new professional PDF from scratch.
+          </p>
+        </div>
+        <button
+          onClick={scrollToResumeBuilder}
+          className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm text-sm flex items-center gap-2"
+        >
+          Jump to Resume Builder
+          <ArrowUpRight size={16} />
+        </button>
+      </header>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* LEFT: ATS Resume Analyzer */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+          <h2 className="text-2xl font-bold mb-6 text-slate-800">ATS Resume Analyzer</h2>
+
+          <div className="mb-6">
+            {uploadedFileName ? (
+              <div className="border-2 border-blue-200 rounded-xl p-6 flex items-center justify-between bg-blue-50">
+                <div className="flex items-center gap-3">
+                  <div className="text-3xl">📄</div>
+                  <div>
+                    <p className="text-slate-800 font-semibold">{uploadedFileName}</p>
+                    <p className="text-slate-500 text-sm">Successfully uploaded</p>
+                  </div>
+                </div>
+                <button
+                  onClick={removePDF}
+                  className="px-4 py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors font-medium"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-blue-500 hover:bg-blue-50/40 transition-colors cursor-pointer"
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                <div className="text-5xl mb-4">📄</div>
+                <p className="text-blue-600 font-semibold">
+                  {isLoading ? "Processing PDF..." : "Click to upload PDF or drag and drop"}
+                </p>
+                <p className="text-slate-500 text-sm mt-2">Supports PDF files only</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Or paste your resume text here:</label>
+            <textarea
+              value={resumeText}
+              onChange={(e) => setResumeText(e.target.value)}
+              rows={10}
+              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400 resize-none"
+              placeholder="Enter your resume text here..."
+            />
+            <button
+              onClick={() => analyzeResume(resumeText)}
+              className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg font-semibold transition-all shadow-sm flex items-center justify-center gap-2"
+            >
+              <BarChart2 size={18} /> Analyze Resume
+            </button>
+          </div>
+
+          {atsScore !== null && (
+            <div className="mt-8">
+              <div className="bg-gradient-to-br from-blue-50 to-slate-50 rounded-2xl p-8 border border-blue-200">
+                <div className="flex flex-col items-center gap-6">
+                  <div className="relative w-40 h-40">
+                    <svg className="w-full h-full" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(59,130,246,0.15)" strokeWidth="8" />
+                      <circle
+                        cx="50" cy="50" r="45" fill="none" stroke="url(#resumeScoreGrad)"
+                        strokeWidth="8" strokeLinecap="round" strokeDasharray="283"
+                        strokeDashoffset={strokeDashoffset}
+                        transform="rotate(-90 50 50)"
+                        className="transition-all duration-1000"
+                      />
+                      <defs>
+                        <linearGradient id="resumeScoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="#3b82f6" />
+                          <stop offset="100%" stopColor="#16a34a" />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <div className="text-5xl font-bold text-blue-700">{atsScore}</div>
+                      <div className="text-sm text-slate-600 font-medium">ATS Score</div>
+                    </div>
+                  </div>
+
+                  <div className="text-center">
+                    {atsScore >= 80 && (
+                      <div className="text-xl font-bold text-green-700">Excellent! Your resume is ATS-friendly! 🎉</div>
+                    )}
+                    {atsScore >= 60 && atsScore < 80 && (
+                      <div className="text-xl font-bold text-amber-700">Good! Your resume is mostly ATS-friendly! 👍</div>
+                    )}
+                    {atsScore < 60 && (
+                      <div className="text-xl font-bold text-orange-700">Needs improvement! Let&apos;s optimize your resume! 💪</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-8 bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                  <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <span className="text-2xl">💡</span> Feedback &amp; Suggestions
+                  </h3>
+                  <ul className="space-y-3">
+                    {feedback.map((item, idx) => (
+                      <li key={idx} className="flex items-start gap-3 text-slate-700">
+                        <span className="w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center flex-shrink-0 font-semibold text-sm">
+                          {idx + 1}
+                        </span>
+                        <span className="leading-relaxed">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: Resume Builder */}
+        <div
+          ref={resumeBuilderRef}
+          id="resume-builder"
+          className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8"
+        >
+          <h2 className="text-2xl font-bold mb-6 text-slate-800">Build Your Resume</h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
+              <input
+                type="text" name="name" value={resumeData.name} onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400"
+                placeholder="Enter your full name"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Professional Role</label>
+              <input
+                type="text" name="role" value={resumeData.role} onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400"
+                placeholder="e.g. Software Engineer"
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                <input type="text" name="phone" value={resumeData.phone} onChange={handleInputChange}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400"
+                  placeholder="Phone number" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <input type="email" name="email" value={resumeData.email} onChange={handleInputChange}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400"
+                  placeholder="Email address" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Location</label>
+                <input type="text" name="location" value={resumeData.location} onChange={handleInputChange}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400"
+                  placeholder="City, Country" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">About Me</label>
+              <textarea name="about" rows={4} value={resumeData.about} onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400 resize-none"
+                placeholder="Tell us about yourself..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Education</label>
+              <textarea name="education" rows={4} value={resumeData.education} onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400 resize-none"
+                placeholder="Add your education details..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Work Experience</label>
+              <textarea name="experience" rows={4} value={resumeData.experience} onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400 resize-none"
+                placeholder="Add your work experience..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Skills (comma / line separated)</label>
+              <textarea name="skills" rows={3} value={resumeData.skills} onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-400 hover:border-blue-300 transition-all text-slate-800 placeholder-slate-400 resize-none"
+                placeholder="List your skills..." />
+            </div>
+            <button
+              onClick={generatePDF}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 px-6 rounded-lg font-semibold transition-all shadow-sm flex items-center justify-center gap-2"
+            >
+              <Upload size={18} /> Download PDF Resume
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
   );
 }
 
